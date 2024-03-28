@@ -3,11 +3,17 @@ import './App.css';
 
 function DataEntryGraph({ data, setData }) {
 	// State variables for storing the parameters of the linear regression model
-	const [m, setM] = useState(0);
+	const [m, setM] = useState([0]);
 	const [c, setC] = useState(0);
-	const [learningRate, setLearningRate] = useState(0.01);
-	const [epochs, setEpochs] = useState(10);
+	const [degree, setDegree] = useState(1);
+	const [learningRate, setLearningRate] = useState(0.000001);
+	const [epochs, setEpochs] = useState(1000);
 	const [paramHistory, setParamHistory] = useState([]);
+
+	// Effect to reset parameters when the degree is changed
+	useEffect(() => {
+		resetParameters();
+	}, [degree]);
 
 	// Functions for updating stored data values
 	function handleXChange(e, index) {
@@ -24,7 +30,7 @@ function DataEntryGraph({ data, setData }) {
 
 	// Function for resetting the linear regression model parameters
 	function resetParameters() {
-		setM(0);
+		setM(new Array(degree).fill(0));
 		setC(0);
 	}
 
@@ -48,52 +54,57 @@ function DataEntryGraph({ data, setData }) {
 		return mean_squared_error;
 	}
 
-	// Function for performing gradient descent (learning) 
 	function gradientDescent() {
 		// Initialise empty list of parameter changes
 		let tempParamHistory = [];
-
+	
 		// Iterate for as many times as the user decides
-		let newM = m;
+		let newM = [...m];
 		let newC = c;
 		for (let i = 0; i < epochs; i++) {
-			// Initialise empty variable for storing the sum of all errors
+			// Initialise empty variables for storing the sum of all errors
 			let errors_sum = 0;
+			let errors_sum_x = new Array(degree).fill(0); // Sum of errors multiplied by x^i for each coefficient
 	
 			data.forEach((point, index) => {
 				// Calculate prediction
 				let prediction = predict(point.x, newM, newC);
-					
-				// Add the error to the errors sum
-				errors_sum += (prediction - point.y)
-			});
 	
-			// Initialise empty variable for storing the sum of all errors multiplied by x
-			let errors_sum_x = 0;
-	
-			data.forEach((point, index) => {
-				// Calculate prediction
-				let prediction = predict(point.x, newM, newC);
-					
 				// Add the error to the errors sum
-				errors_sum_x += (prediction - point.y) * point.x
+				let error = prediction - point.y;
+				errors_sum += error;
+	
+				// Update errors_sum_x for each coefficient
+				for (let j = 1; j <= degree; j++) {
+					errors_sum_x[j - 1] += error * Math.pow(point.x, j);
+				}
 			});
 	
 			// Change the parameters in the direction of reduced error
-			newC = newC - learningRate * (1/data.length) * errors_sum;
-			newM = newM - learningRate * (1/data.length) * errors_sum_x;
-
-			// Add the new parameters to the parameter history	
-			tempParamHistory.push({m: newM, c: newC});
+			newC = newC - learningRate * (1 / data.length) * errors_sum;
+			for (let j = 0; j < degree; j++) {
+				newM[j] = newM[j] - learningRate * (1 / data.length) * errors_sum_x[j];
+			}
+	
+			// Add the new parameters to the parameter history
+			tempParamHistory.push({ m: newM, c: newC });
 		}
-
+	
 		// Show the parameter changes on the graph
-		setParamHistory(tempParamHistory);
+		//setParamHistory(tempParamHistory);
+		setM(newM);
+		setC(newC);
 	}
 
 	// Function for predicting a value given the x value
 	function predict(x, tempM, tempC) {
-		return (tempM * x) + tempC
+		let sum_features = 0;
+
+		for (let i = 1; i <= tempM.length; i++) {
+			sum_features += tempM[i-1] * (x ** i);
+		}
+
+		return sum_features + tempC;
 	}
 
 	// Function for slowly showing changes to the regression parameters
@@ -101,15 +112,31 @@ function DataEntryGraph({ data, setData }) {
 		let index = 0;
 		const intervalId = setInterval(() => {
 			if (index < paramHistory.length) {
-				console.log("Updating!");
-				setM(paramHistory[index].m);
+				setM([...paramHistory[index].m]);
 				setC(paramHistory[index].c);
 				index++;
 			} else {
 				clearInterval(intervalId);
 			}
-		}, 1000 / paramHistory.length); // Divide 5000ms by the length of paramHistory to spread the updates over 5 seconds
+		}, 0);
 	}, [paramHistory]);
+
+	// Function for describing the current regression line
+	function describeRegressionLine() {
+		let description = "";
+
+		m.forEach((parameter, index) => {
+			let power = index + 1;
+			description += parameter;
+			description += "x^" + power + " "; 
+			if (index != m.length) {
+				description += "+ "
+			}
+		});
+
+		description += c;
+		return description;
+	}
 
 	// Overlay a square background on the graph
 	return (
@@ -136,7 +163,17 @@ function DataEntryGraph({ data, setData }) {
 					))}		
 
 					{/* Plotting regression line */}
-					<line x1="0" y1={250 - (-250)*m - c} x2="500" y2={250 - (m * 250 + c)} stroke="blue" />
+					<path 
+						d={
+							"M" + 
+							Array.from({length: 500}, (_, x) => {
+								const y = predict(x - 250, m, c);
+								return `${x},${250 - y}`;
+							}).join(" L")
+						} 
+						stroke="blue" 
+						fill="transparent"
+					/>
 				</svg>
 			</div>	
 			<table className="values-table" style={{borderCollapse: 'collapse'}}>
@@ -178,16 +215,18 @@ function DataEntryGraph({ data, setData }) {
 			<div>
 				<label for="learning-rate" style={{marginRight: 10}}>Learning rate:</label>
 				<input type="number" name="learning-rate" value={learningRate} onChange={(e) => setLearningRate(Number(e.target.value))} style={{marginRight: 10}} /><br />
-				<label for="epochs" style={{marginRight: 10}}>Epochs:</label>
-				<input type="number" name="epochs" value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} style={{marginRight: 10}} /><br /><br />
-				<button onClick={gradientDescent} style={{marginRight: 10, fontSize: 15}}>Begin learning</button>
+				<label for="iterations" style={{marginRight: 10}}>Iterations:</label>
+				<input type="number" name="iterations" value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} style={{marginRight: 10}} /><br />
+				<label for="degree" style={{marginRight: 10}}>Polynomial degree:</label> 
+				<input type="number" name="degree" value={degree} onChange={(e) => setDegree(Number(e.target.value))} style={{marginRight: 10}} /><br /><br />
+				<button onClick={gradientDescent} style={{marginRight: 10, fontSize: 15}}>Learn</button>
 				<button onClick={resetParameters} style={{marginRight: 10, fontSize: 15}}>Reset parameters</button>
 			</div>
 
 			{/* Display current linear regression model parameters */}
 			<div>
 				<h2>Linear regression parameters</h2>
-				<p>y = {m}x + {c}</p>
+				<p>{describeRegressionLine()}</p>
 			</div>
 		</div>
 	);
